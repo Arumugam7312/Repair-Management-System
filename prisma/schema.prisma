@@ -1,0 +1,208 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  Admin
+  Manager
+  Receptionist
+  Technician
+  Customer
+}
+
+enum TicketStatus {
+  Booked
+  Inspected
+  Estimate_Approved
+  Estimate_Rejected
+  In_Repair
+  Quality_Check
+  Ready_For_Pickup
+  Delivered
+  Cancelled
+}
+
+enum InvoiceStatus {
+  Pending
+  Partially_Paid
+  Paid
+  Refunded
+}
+
+enum StockMovementType {
+  IN
+  OUT
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         UserRole  @default(Customer)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  employee     Employee?
+  customer     Customer?
+}
+
+model Employee {
+  id           String         @id @default(uuid())
+  userId       String         @unique
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  mobile       String
+  pinCode      String?
+  createdAt    DateTime       @default(now())
+  tickets      RepairTicket[] @relation("TechnicianTickets")
+}
+
+model Customer {
+  id        String         @id @default(uuid())
+  userId    String?        @unique
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name      String
+  email     String
+  mobile    String         @unique
+  createdAt DateTime       @default(now())
+  devices   Device[]
+}
+
+model Device {
+  id           String         @id @default(uuid())
+  customerId   String
+  customer     Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  brand        String
+  model        String
+  imei         String?
+  serialNumber String?
+  accessories  String?
+  password     String?        // Encrypted at rest
+  condition    String
+  issue        String
+  createdAt    DateTime       @default(now())
+  tickets      RepairTicket[]
+}
+
+model RepairTicket {
+  id                   String          @id @default(uuid())
+  ticketNumber         String          @unique // e.g. RHP-2026-1001
+  deviceId             String
+  device               Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  assignedTechnicianId String?
+  technician           Employee?       @relation("TechnicianTickets", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  notes                String?
+  images               String[]        // URLs or local upload paths
+  costEstimate         Decimal         @default(0.00)
+  status               TicketStatus    @default(Booked)
+  qrCode               String?         // SVG or Base64
+  barcode              String?         // SVG or Base64
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  statusHistory        StatusHistory[]
+  invoice              Invoice?
+}
+
+model StatusHistory {
+  id           String       @id @default(uuid())
+  ticketId     String
+  ticket       RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  status       TicketStatus
+  changedBy    String       // e.g. "Employee: Admin John" or "Customer"
+  notes        String?
+  createdAt    DateTime     @default(now())
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  ticketId      String        @unique
+  ticket        RepairTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  invoiceNumber String        @unique // e.g. INV-2026-1001
+  amount        Decimal       @default(0.00) // Base amount before taxes/discounts
+  taxRate       Decimal       @default(18.00) // GST/VAT Percentage stored at invoice creation
+  taxAmount     Decimal       @default(0.00)
+  discount      Decimal       @default(0.00)
+  total         Decimal       @default(0.00)
+  status        InvoiceStatus @default(Pending)
+  paymentMethod String?       // e.g., "Cash", "Card", "UPI"
+  transactionId String?
+  createdAt     DateTime      @default(now())
+  payments      Payment[]
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  invoiceId     String
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount        Decimal
+  paymentMethod String
+  transactionId String
+  status        String   // e.g., "Success"
+  createdAt     DateTime @default(now())
+}
+
+model InventoryItem {
+  id             String          @id @default(uuid())
+  name           String
+  category       String          // e.g. "Screens", "Batteries", "ICs"
+  quantity       Int             @default(0)
+  minQuantity    Int             @default(5)
+  sku            String          @unique
+  location       String?         // e.g., "Shelf A-3"
+  price          Decimal         @default(0.00)
+  supplierId     String?
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  createdAt      DateTime        @default(now())
+  stockMovements StockMovement[]
+}
+
+model StockMovement {
+  id          String            @id @default(uuid())
+  itemId      String
+  item        InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  quantity    Int
+  type        StockMovementType
+  reason      String            // e.g., "Restocked", "Used in Ticket RHP-2026-1001"
+  createdAt   DateTime          @default(now())
+}
+
+model Supplier {
+  id            String          @id @default(uuid())
+  name          String
+  contactPerson String?
+  email         String?
+  mobile        String?
+  address       String?
+  createdAt     DateTime        @default(now())
+  items         InventoryItem[]
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  category    String   // e.g. "Rent", "Utility", "Tools"
+  amount      Decimal
+  description String?
+  date        DateTime @default(now())
+  createdBy   String   // User email or ID
+  createdAt   DateTime @default(now())
+}
+
+model Settings {
+  id             String   @id @default("1")
+  businessName   String   @default("RepairHub Pro")
+  businessEmail  String   @default("support@repairhubpro.com")
+  businessPhone  String   @default("+91 98765 43210")
+  businessAddress String   @default("123 Tech Park, Phase 1, Bangalore, Karnataka - 560001")
+  currencySymbol String   @default("₹")
+  currencyCode   String   @default("INR")
+  taxLabel       String   @default("GST")
+  taxRate        Decimal  @default(18.0)
+  updatedAt      DateTime @updatedAt
+}
